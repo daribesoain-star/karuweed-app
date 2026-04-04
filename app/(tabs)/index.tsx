@@ -1,0 +1,167 @@
+import React, { useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useAuthStore } from '@/store/authStore';
+import { usePlantStore } from '@/store/plantStore';
+import { Button } from '@/components/Button';
+import { PlantCard } from '@/components/PlantCard';
+import { formatDistanceToNow } from 'date-fns';
+import { es } from 'date-fns/locale';
+
+export default function HomeScreen() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const { plants, fetchPlants } = usePlantStore();
+
+  useEffect(() => {
+    if (user) {
+      fetchPlants(user.id);
+    }
+  }, [user]);
+
+  const activePlants = plants.filter((p) => p.is_active);
+  const totalCheckIns = plants.reduce((acc, plant) => acc + (plant.notes ? 1 : 0), 0);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={{ paddingHorizontal: 16, paddingVertical: 24 }}>
+          <Text style={{ fontSize: 28, fontWeight: '700', color: '#FFFFFF', marginBottom: 8 }}>
+            Hola, {user?.full_name.split(' ')[0]}
+          </Text>
+          <Text style={{ fontSize: 14, color: '#A0A0A0' }}>
+            Aquí está tu resumen de cultivo
+          </Text>
+        </View>
+
+        {/* Stats Cards */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: '#0B3D2E',
+                borderRadius: 12,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: '#22C55E' + '40',
+              }}
+            >
+              <Text style={{ color: '#A0A0A0', fontSize: 12, marginBottom: 8 }}>
+                Plantas activas
+              </Text>
+              <Text style={{ fontSize: 28, fontWeight: '700', color: '#22C55E' }}>
+                {activePlants.length}
+              </Text>
+            </View>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: '#1A1A2E',
+                borderRadius: 12,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: '#3A3A4E',
+              }}
+            >
+              <Text style={{ color: '#A0A0A0', fontSize: 12, marginBottom: 8 }}>
+                Check-ins
+              </Text>
+              <Text style={{ fontSize: 28, fontWeight: '700', color: '#86EFAC' }}>
+                {totalCheckIns}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Quick Action */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
+          <Button
+            title="Nuevo Check-in"
+            onPress={() => {
+              if (activePlants.length > 0) {
+                router.push(`/checkin/${activePlants[0].id}`);
+              } else {
+                // Show alert to create a plant first
+              }
+            }}
+            size="large"
+          />
+        </View>
+
+        {/* Active Plants Section */}
+        <View style={{ paddingHorizontal: 16 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#FFFFFF' }}>
+              Tus plantas
+            </Text>
+            <TouchableOpacity onPress={() => router.push('/plants')}>
+              <Text style={{ color: '#22C55E', fontSize: 14, fontWeight: '600' }}>
+                Ver todas
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {activePlants.length > 0 ? (
+            <View>
+              {activePlants.slice(0, 3).map((plant) => (
+                <PlantCard
+                  key={plant.id}
+                  plant={plant}
+                  onPress={() => router.push(`/plant/${plant.id}`)}
+                />
+              ))}
+            </View>
+          ) : (
+            <View
+              style={{
+                backgroundColor: '#1A1A2E',
+                borderRadius: 12,
+                padding: 24,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 32, marginBottom: 12 }}>🌱</Text>
+              <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
+                Sin plantas activas
+              </Text>
+              <Text
+                style={{
+                  color: '#A0A0A0',
+                  fontSize: 14,
+                  textAlign: 'center',
+                  marginBottom: 16,
+                }}
+              >
+                Crea tu primera planta para comenzar a registrar su cultivo
+              </Text>
+              <Button
+                title="Crear planta"
+                onPress={() => router.push('/plant/new')}
+                size="medium"
+              />
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
