@@ -2,6 +2,29 @@ import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/lib/types';
 
+// Spanish translations for common Supabase auth errors
+const errorTranslations: Record<string, string> = {
+  'Invalid login credentials': 'Email o contraseña incorrectos',
+  'Email not confirmed': 'Debes confirmar tu email. Revisa tu correo (incluyendo spam)',
+  'User already registered': 'Este email ya está registrado. Intenta iniciar sesión',
+  'Password should be at least 6 characters': 'La contraseña debe tener al menos 6 caracteres',
+  'Unable to validate email address: invalid format': 'Formato de email inválido',
+  'Email rate limit exceeded': 'Demasiados intentos. Espera unos minutos',
+  'For security purposes, you can only request this after': 'Por seguridad, espera unos segundos antes de reintentar',
+  'Signup requires a valid password': 'La contraseña es requerida',
+  'JSON object requested, multiple (or no) rows returned': 'Error de perfil. Contacta soporte',
+};
+
+function translateError(message: string): string {
+  // Check exact matches first
+  if (errorTranslations[message]) return errorTranslations[message];
+  // Check partial matches
+  for (const [key, value] of Object.entries(errorTranslations)) {
+    if (message.includes(key)) return value;
+  }
+  return message;
+}
+
 interface AuthStoreState {
   user: User | null;
   session: string | null;
@@ -11,6 +34,7 @@ interface AuthStoreState {
   signUp: (email: string, password: string, fullName: string, countryCode: string) => Promise<void>;
   signOut: () => Promise<void>;
   fetchUser: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -24,7 +48,7 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password,
       });
 
@@ -48,9 +72,9 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign in failed';
+      const message = error instanceof Error ? error.message : 'Error al iniciar sesión';
       set({
-        error: message,
+        error: translateError(message),
         isLoading: false,
       });
       throw error;
@@ -60,39 +84,83 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   signUp: async (email: string, password: string, fullName: string, countryCode: string) => {
     set({ isLoading: true, error: null });
     try {
+      // Pass full_name in metadata so the trigger can use it
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: email.trim().toLowerCase(),
         password,
+        options: {
+          data: {
+            full_name: fullName,
+            country_code: countryCode,
+          },
+        },
       });
 
       if (error) throw error;
 
       if (data.user) {
-        // Create user profile
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: data.user.id,
-            email,
-            full_name: fullName,
-            country_code: countryCode,
-            subscription_tier: 'free',
-          })
-          .select()
-          .single();
+        // The trigger 'on_auth_user_created' auto-creates the profile.
+        // We DON'T insert a profile manually to avoid duplicate key errors.
 
-        if (profileError) throw profileError;
+        // If email confirmation is disabled, we'll have a session immediately
+        if (data.session) {
+          // Update the profile with extra fields the trigger didn't set
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              full_name: fullName,
+              country_code: countryCode,
+            })
+            .eq('id', data.user.id);
 
-        set({
-          user: profile as User,
-          session: data.session?.access_token || null,
-          isLoading: false,
-        });
+          if (updateError) {
+            console.warn('Profile update warning:', updateError.message);
+          }
+
+          // Fetch the complete profile
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+
+          set({
+            user: profile ? (profile as User) : null,
+            session: data.session.access_token,
+            isLoading: false,
+          });
+        } else {
+          // Email confirmation is enabled — user needs to confirm email
+          // This is NOT an error, it's expected behavior
+          set({ isLoading: false });
+        }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign up failed';
+      const message = error instanceof Error ? error.message : 'Error al registrarse';
       set({
-        error: message,
+        error: translateError(message),
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
+  resetPassword: async (email: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        {
+          redirectTo: 'karuweed://reset-password',
+        }
+      );
+
+      if (error) throw error;
+      set({ isLoading: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al enviar email de recuperación';
+      set({
+        error: translateError(message),
         isLoading: false,
       });
       throw error;
@@ -111,9 +179,9 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
         isLoading: false,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign out failed';
+      const message = error instanceof Error ? error.message : 'Error al cerrar sesión';
       set({
-        error: message,
+        error: translateError(message),
         isLoading: false,
       });
       throw error;
@@ -149,9 +217,9 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
         isLoading: false,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch user';
       set({
-        error: message,
+        user: null,
+        session: null,
         isLoading: false,
       });
     }
