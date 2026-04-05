@@ -16,7 +16,14 @@ function AppContent() {
     return (
       <View style={{ flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar style="light" backgroundColor="#0A0A0A" />
-        <ActivityIndicator size="large" color="#22C55E" />
+        <Text style={{ fontSize: 48, marginBottom: 8 }}>🌿</Text>
+        <Text style={{ color: '#22C55E', fontSize: 28, fontWeight: '700', marginBottom: 4 }}>
+          KaruWeed
+        </Text>
+        <Text style={{ color: '#A0A0A0', fontSize: 14, marginBottom: 24 }}>
+          Tu cultivo, guiado por inteligencia
+        </Text>
+        <ActivityIndicator size="small" color="#22C55E" />
       </View>
     );
   }
