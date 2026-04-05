@@ -10,13 +10,14 @@ function TabBarIcon(props: {
   const iconMap: Record<string, string> = {
     home: '🏠',
     plants: '🌱',
+    music: '🎵',
     map: '🗺️',
     profile: '👤',
   };
 
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontSize: 24 }}>{iconMap[props.name]}</Text>
+      <Text style={{ fontSize: 22 }}>{iconMap[props.name]}</Text>
     </View>
   );
 }
@@ -35,9 +36,9 @@ export default function TabsLayout() {
           height: 60,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 10,
           fontWeight: '600',
-          marginTop: 4,
+          marginTop: 2,
         },
         tabBarActiveTintColor: '#22C55E',
         tabBarInactiveTintColor: '#A0A0A0',
@@ -55,6 +56,13 @@ export default function TabsLayout() {
         options={{
           title: 'Plantas',
           tabBarIcon: (props) => <TabBarIcon {...props} name="plants" />,
+        }}
+      />
+      <Tabs.Screen
+        name="music"
+        options={{
+          title: 'Música',
+          tabBarIcon: (props) => <TabBarIcon {...props} name="music" />,
         }}
       />
       <Tabs.Screen
