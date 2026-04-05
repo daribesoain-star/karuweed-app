@@ -1,10 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Slot, Redirect, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
 import { useAuthStore } from '../src/store/authStore';
 
-export default function RootLayout() {
+function AppContent() {
   const { user, isLoading, fetchUser } = useAuthStore();
   const segments = useSegments();
 
@@ -36,5 +36,48 @@ export default function RootLayout() {
       <StatusBar style="light" backgroundColor="#0A0A0A" />
       <Slot />
     </>
+  );
+}
+
+// Error boundary to prevent crashes
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <StatusBar style="light" backgroundColor="#0A0A0A" />
+          <Text style={{ color: '#22C55E', fontSize: 24, fontWeight: 'bold', marginBottom: 12 }}>
+            KaruWeed
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 16, textAlign: 'center', marginBottom: 8 }}>
+            Algo salió mal. Reinicia la app.
+          </Text>
+          <Text style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>
+            {this.state.error?.message || 'Error desconocido'}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function RootLayout() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }
