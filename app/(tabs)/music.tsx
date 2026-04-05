@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Animated, Easing, Alert } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Animated, Easing, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Audio } from 'expo-av';
 import { PlantStage } from '@/lib/types';
 
 // Frequency presets per growth stage
@@ -13,10 +14,74 @@ const STAGE_PRESETS: Record<PlantStage, { hz: number; duration: number; label: s
 };
 
 const MAX_DAILY_MINUTES = 180;
+const SAMPLE_RATE = 44100;
+const TONE_DURATION_SECONDS = 30; // Generate 30-second tone clips, loop them
 
-// Note: AudioContext/OscillatorNode from react-native-audio-api would be used
-// in a real build. For now, we implement the UI and state management.
-// The actual audio generation will use: import { AudioContext } from 'react-native-audio-api';
+// Generate a WAV file buffer for a sine wave at given frequency
+function generateSineWavBuffer(frequency: number, durationSec: number, sampleRate: number): string {
+  const numSamples = sampleRate * durationSec;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * blockAlign;
+  const headerSize = 44;
+  const totalSize = headerSize + dataSize;
+
+  // Create buffer
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+
+  // WAV header
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, totalSize - 8, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // format chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // Generate sine wave samples with fade in/out (3 sec)
+  const fadeInSamples = Math.min(sampleRate * 3, numSamples / 2);
+  const fadeOutSamples = Math.min(sampleRate * 3, numSamples / 2);
+  const fadeOutStart = numSamples - fadeOutSamples;
+
+  for (let i = 0; i < numSamples; i++) {
+    let amplitude = 0.3; // 30% volume to not be too loud
+    // Fade in
+    if (i < fadeInSamples) {
+      amplitude *= i / fadeInSamples;
+    }
+    // Fade out
+    if (i > fadeOutStart) {
+      amplitude *= (numSamples - i) / fadeOutSamples;
+    }
+
+    const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate) * amplitude;
+    const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+    view.setInt16(headerSize + i * 2, intSample, true);
+  }
+
+  // Convert to base64
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 export default function MusicScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -24,13 +89,32 @@ export default function MusicScreen() {
   const [customHz, setCustomHz] = useState<number | null>(null);
   const [sessionMinutes, setSessionMinutes] = useState(0);
   const [dailyMinutes, setDailyMinutes] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
 
   const activePreset = STAGE_PRESETS[selectedStage];
   const activeHz = customHz || activePreset.hz;
   const remainingDaily = MAX_DAILY_MINUTES - dailyMinutes;
+
+  // Configure audio mode
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: true,
+    }).catch(console.error);
+
+    return () => {
+      // Cleanup on unmount
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (isPlaying) {
@@ -45,7 +129,7 @@ export default function MusicScreen() {
       Animated.loop(
         Animated.timing(rotateAnim, { toValue: 1, duration: 10000, easing: Easing.linear, useNativeDriver: true })
       ).start();
-      // Timer
+      // Timer - every minute
       timerRef.current = setInterval(() => {
         setSessionMinutes((prev) => prev + 1);
         setDailyMinutes((prev) => {
@@ -56,7 +140,7 @@ export default function MusicScreen() {
           }
           return prev + 1;
         });
-      }, 60000); // every minute
+      }, 60000);
     } else {
       pulseAnim.setValue(1);
       rotateAnim.setValue(0);
@@ -70,23 +154,53 @@ export default function MusicScreen() {
     };
   }, [isPlaying]);
 
-  const handlePlay = () => {
+  const handlePlay = useCallback(async () => {
     if (remainingDaily <= 0) {
       Alert.alert('Límite alcanzado', 'Ya usaste las 3 horas de música hoy. Vuelve mañana.');
       return;
     }
-    setSessionMinutes(0);
-    setIsPlaying(true);
-    // TODO: Start OscillatorNode with activeHz frequency
-    // const ctx = new AudioContext();
-    // const osc = ctx.createOscillator(); osc.frequency.value = activeHz; osc.type = 'sine';
-    // osc.connect(ctx.destination); osc.start();
-  };
 
-  const handleStop = () => {
+    setIsLoading(true);
+    try {
+      // Unload previous sound if exists
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      // Generate WAV tone
+      const base64Wav = generateSineWavBuffer(activeHz, TONE_DURATION_SECONDS, SAMPLE_RATE);
+      const uri = `data:audio/wav;base64,${base64Wav}`;
+
+      // Create and play sound
+      const { sound } = await Audio.Sound.createAsync(
+        { uri },
+        { isLooping: true, volume: 0.7, shouldPlay: true },
+      );
+      soundRef.current = sound;
+
+      setSessionMinutes(0);
+      setIsPlaying(true);
+    } catch (error) {
+      console.error('Error playing tone:', error);
+      Alert.alert('Error', 'No se pudo reproducir el audio. Verifica los permisos de audio.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeHz, remainingDaily]);
+
+  const handleStop = useCallback(async () => {
+    try {
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+    } catch (error) {
+      console.error('Error stopping audio:', error);
+    }
     setIsPlaying(false);
-    // TODO: Stop OscillatorNode
-  };
+  }, []);
 
   const rotateInterpolate = rotateAnim.interpolate({
     inputRange: [0, 1],
@@ -161,8 +275,9 @@ export default function MusicScreen() {
         <View style={{ paddingHorizontal: 32, marginBottom: 24 }}>
           <TouchableOpacity
             onPress={isPlaying ? handleStop : handlePlay}
+            disabled={isLoading}
             style={{
-              backgroundColor: isPlaying ? '#CC0000' : '#22C55E',
+              backgroundColor: isLoading ? '#666' : isPlaying ? '#CC0000' : '#22C55E',
               borderRadius: 16,
               paddingVertical: 18,
               alignItems: 'center',
@@ -172,9 +287,11 @@ export default function MusicScreen() {
             }}
             activeOpacity={0.8}
           >
-            <Text style={{ fontSize: 20 }}>{isPlaying ? '⏹' : '▶️'}</Text>
+            <Text style={{ fontSize: 20 }}>
+              {isLoading ? '⏳' : isPlaying ? '⏹' : '▶️'}
+            </Text>
             <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '700' }}>
-              {isPlaying ? 'Detener' : 'Reproducir'}
+              {isLoading ? 'Cargando...' : isPlaying ? 'Detener' : 'Reproducir'}
             </Text>
           </TouchableOpacity>
         </View>
