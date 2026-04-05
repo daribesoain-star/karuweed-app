@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/authStore';
 import { usePlantStore } from '@/store/plantStore';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/Button';
 import { PlantCard } from '@/components/PlantCard';
 import { formatDistanceToNow } from 'date-fns';
@@ -13,15 +14,48 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { plants, fetchPlants } = usePlantStore();
+  const [totalCheckIns, setTotalCheckIns] = useState(0);
 
   useEffect(() => {
     if (user) {
       fetchPlants(user.id);
+      // Fetch real check-in count from database
+      fetchCheckInCount(user.id);
     }
   }, [user]);
 
+  const fetchCheckInCount = async (userId: string) => {
+    try {
+      const plantIds = plants.map((p) => p.id);
+      if (plantIds.length === 0) {
+        // If plants haven't loaded yet, query all user's check-ins via plant relationship
+        const { count, error } = await supabase
+          .from('checkins')
+          .select('id', { count: 'exact', head: true })
+          .in('plant_id',
+            (await supabase.from('plants').select('id').eq('user_id', userId)).data?.map((p: any) => p.id) || []
+          );
+        if (!error && count !== null) setTotalCheckIns(count);
+      } else {
+        const { count, error } = await supabase
+          .from('checkins')
+          .select('id', { count: 'exact', head: true })
+          .in('plant_id', plantIds);
+        if (!error && count !== null) setTotalCheckIns(count);
+      }
+    } catch (e) {
+      console.error('Error fetching check-in count:', e);
+    }
+  };
+
+  // Re-fetch check-in count when plants change
+  useEffect(() => {
+    if (user && plants.length > 0) {
+      fetchCheckInCount(user.id);
+    }
+  }, [plants]);
+
   const activePlants = plants.filter((p) => p.is_active);
-  const totalCheckIns = plants.reduce((acc, plant) => acc + (plant.notes ? 1 : 0), 0);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
