@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.41.0",
     "date-fns": "^3.3.0",
     "expo": "~54.0.0",
+    "expo-av": "~15.0.11",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-image-picker": "~17.0.10",
