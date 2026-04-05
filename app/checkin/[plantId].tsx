@@ -95,14 +95,22 @@ export default function CheckInScreen() {
   const analyzePhoto = async (base64: string) => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzePlantImage(base64);
+      const result = await analyzePlantImage(
+        base64,
+        plant?.strain,
+        plant?.stage,
+      );
       setAnalysis(result);
       // Auto-select identified issues
       if (result.identified_issues && result.identified_issues.length > 0) {
         setSelectedIssues(result.identified_issues);
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo analizar la foto. Intenta de nuevo.');
+      // IA analysis is optional — don't block the user
+      Alert.alert(
+        'Análisis IA no disponible',
+        'No se pudo conectar con la IA. Puedes guardar el check-in sin análisis.',
+      );
       console.error(error);
     } finally {
       setIsAnalyzing(false);
@@ -119,11 +127,7 @@ export default function CheckInScreen() {
       Alert.alert('Error', 'Por favor indica la altura de la planta');
       return;
     }
-
-    if (!analysis) {
-      Alert.alert('Error', 'Por favor espera a que se analice la foto');
-      return;
-    }
+    // AI analysis is optional — user can save without it
 
     setIsLoading(true);
 
@@ -147,12 +151,12 @@ export default function CheckInScreen() {
         data: { publicUrl },
       } = supabase.storage.from('checkin-photos').getPublicUrl(filename);
 
-      // Create check-in record
+      // Create check-in record (ai_analysis may be null if IA failed)
       const { error: insertError } = await supabase.from('checkins').insert({
         plant_id: plantId,
         date: new Date().toISOString(),
         photo_url: publicUrl,
-        ai_analysis: analysis,
+        ai_analysis: analysis || null,
         height_cm: parseFloat(heightCm),
         notes: notes || null,
         issues: selectedIssues,
@@ -420,7 +424,7 @@ export default function CheckInScreen() {
           <Button
             title={isLoading ? 'Guardando...' : 'Guardar check-in'}
             onPress={handleSubmit}
-            disabled={!photo || !heightCm || !analysis || isLoading}
+            disabled={!photo || !heightCm || isLoading || isAnalyzing}
             loading={isLoading}
             size="large"
           />
